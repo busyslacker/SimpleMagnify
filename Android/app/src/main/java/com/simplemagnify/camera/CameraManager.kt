@@ -2,6 +2,8 @@ package com.simplemagnify.camera
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -26,14 +28,16 @@ class CameraManager(private val context: Context) {
     var capturedBitmap by mutableStateOf<Bitmap?>(null)
         private set
 
-    var maxZoom by mutableStateOf(10.0f)
+    var isCapturing by mutableStateOf(false)
+        private set
+
+    var maxZoom by mutableStateOf(3.0f)
         private set
 
     private var camera: Camera? = null
     private var preview: Preview? = null
-    private var imageAnalysis: ImageAnalysis? = null
+    private var imageCapture: ImageCapture? = null
     private var cameraProvider: ProcessCameraProvider? = null
-    private var lastFrame: Bitmap? = null
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -54,17 +58,11 @@ class CameraManager(private val context: Context) {
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
 
-                // Image analysis for frame capture
-                imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                // High-resolution image capture
+                imageCapture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                    .setTargetRotation(previewView.display.rotation)
                     .build()
-                    .also { analysis ->
-                        analysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                            // Convert to bitmap for freeze functionality
-                            lastFrame = imageProxy.toBitmap()
-                            imageProxy.close()
-                        }
-                    }
 
                 // Select back camera
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -77,13 +75,16 @@ class CameraManager(private val context: Context) {
                     lifecycleOwner,
                     cameraSelector,
                     preview,
-                    imageAnalysis
+                    imageCapture
                 )
 
-                // Get max zoom
+                // Get max zoom - limit to 3x for preview (optical range)
                 camera?.cameraInfo?.zoomState?.value?.let { zoomState ->
-                    maxZoom = minOf(zoomState.maxZoomRatio, 10.0f)
+                    maxZoom = minOf(zoomState.maxZoomRatio, 3.0f)
                 }
+
+                // Enable auto-focus
+                camera?.cameraControl?.cancelFocusAndMetering()
 
                 isCameraReady = true
 
@@ -110,8 +111,59 @@ class CameraManager(private val context: Context) {
         isFlashlightOn = on
     }
 
-    fun captureCurrentFrame() {
-        capturedBitmap = lastFrame
+    fun focusOnPoint(x: Float, y: Float, previewView: PreviewView) {
+        val factory = previewView.meteringPointFactory
+        val point = factory.createPoint(x, y)
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+            .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        camera?.cameraControl?.startFocusAndMetering(action)
+    }
+
+    fun capturePhoto(onCaptured: () -> Unit = {}) {
+        if (isCapturing) return
+
+        val capture = imageCapture ?: return
+
+        isCapturing = true
+
+        capture.takePicture(
+            cameraExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val bitmap = imageProxyToBitmap(image)
+                    image.close()
+
+                    ContextCompat.getMainExecutor(context).execute {
+                        capturedBitmap = bitmap
+                        isCapturing = false
+                        onCaptured()
+                    }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("CameraManager", "Photo capture failed", exception)
+                    ContextCompat.getMainExecutor(context).execute {
+                        isCapturing = false
+                    }
+                }
+            }
+        )
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        val buffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+
+        // Rotate bitmap based on image rotation
+        return bitmap?.let {
+            val matrix = Matrix()
+            matrix.postRotate(image.imageInfo.rotationDegrees.toFloat())
+            Bitmap.createBitmap(it, 0, 0, it.width, it.height, matrix, true)
+        }
     }
 
     fun clearCapturedFrame() {
@@ -127,27 +179,4 @@ class CameraManager(private val context: Context) {
     fun shutdown() {
         cameraExecutor.shutdown()
     }
-}
-
-// Extension to convert ImageProxy to Bitmap
-private fun ImageProxy.toBitmap(): Bitmap? {
-    val buffer = planes[0].buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
-
-    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        ?: run {
-            // Fallback for YUV format
-            val yuvImage = android.graphics.YuvImage(
-                bytes,
-                android.graphics.ImageFormat.NV21,
-                width,
-                height,
-                null
-            )
-            val out = java.io.ByteArrayOutputStream()
-            yuvImage.compressToJpeg(android.graphics.Rect(0, 0, width, height), 90, out)
-            val imageBytes = out.toByteArray()
-            android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        }
 }

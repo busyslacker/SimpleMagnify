@@ -127,9 +127,9 @@ fun CameraScreen(
             isFlashlightOn = cameraManager.isFlashlightOn,
             onZoomChange = { zoomLevel = it },
             onLightToggle = { cameraManager.toggleFlashlight() },
+            isCapturing = cameraManager.isCapturing,
             onFreeze = {
-                cameraManager.captureCurrentFrame()
-                if (cameraManager.capturedBitmap != null) {
+                cameraManager.capturePhoto {
                     onNavigateToFrozenImage()
                 }
             }
@@ -231,6 +231,7 @@ private fun CameraControls(
     settings: AppSettings,
     zoomLevel: Float,
     isFlashlightOn: Boolean,
+    isCapturing: Boolean,
     onZoomChange: (Float) -> Unit,
     onLightToggle: () -> Unit,
     onFreeze: () -> Unit
@@ -261,6 +262,7 @@ private fun CameraControls(
                         title = Constants.Strings.FREEZE,
                         icon = Icons.Default.CameraAlt,
                         settings = settings,
+                        enabled = !isCapturing,
                         onClick = onFreeze
                     )
                 }
@@ -288,6 +290,7 @@ private fun CameraControls(
                         title = Constants.Strings.FREEZE,
                         icon = Icons.Default.CameraAlt,
                         settings = settings,
+                        enabled = !isCapturing,
                         onClick = onFreeze
                     )
                 }

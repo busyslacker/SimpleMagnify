@@ -20,6 +20,7 @@ fun BigButton(
     icon: ImageVector,
     settings: AppSettings,
     isActive: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val backgroundColor = if (isActive) settings.buttonColor else settings.buttonBackgroundColor
@@ -27,6 +28,7 @@ fun BigButton(
 
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
             .height(Constants.Dimensions.buttonHeight)
