@@ -130,6 +130,8 @@ fun CameraScreen(
             isCapturing = cameraManager.isCapturing,
             onFreeze = {
                 cameraManager.capturePhoto {
+                    // Copy bitmap to shared holder for navigation
+                    CapturedImageHolder.bitmap = cameraManager.capturedBitmap
                     onNavigateToFrozenImage()
                 }
             }
@@ -260,7 +262,7 @@ private fun CameraControls(
                 Box(modifier = Modifier.weight(1f)) {
                     BigButton(
                         title = Constants.Strings.FREEZE,
-                        icon = Icons.Default.CameraAlt,
+                        icon = Icons.Default.PhotoCamera,
                         settings = settings,
                         enabled = !isCapturing,
                         onClick = onFreeze
@@ -288,7 +290,7 @@ private fun CameraControls(
                 Box(modifier = Modifier.weight(1f)) {
                     BigButton(
                         title = Constants.Strings.FREEZE,
-                        icon = Icons.Default.CameraAlt,
+                        icon = Icons.Default.PhotoCamera,
                         settings = settings,
                         enabled = !isCapturing,
                         onClick = onFreeze
@@ -313,7 +315,7 @@ private fun PermissionRationale(
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.CameraAlt,
+            imageVector = Icons.Default.PhotoCamera,
             contentDescription = null,
             tint = settings.textColor,
             modifier = Modifier.size(60.dp)
@@ -362,7 +364,7 @@ private fun PermissionDenied(
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.CameraAlt,
+            imageVector = Icons.Default.PhotoCamera,
             contentDescription = null,
             tint = settings.textColor,
             modifier = Modifier.size(60.dp)

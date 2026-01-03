@@ -12,7 +12,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
+import java.io.File
 import java.util.concurrent.Executors
 
 class CameraManager(private val context: Context) {
@@ -58,7 +60,7 @@ class CameraManager(private val context: Context) {
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
 
-                // High-resolution image capture
+                // High-resolution image capture with JPEG output
                 imageCapture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setTargetRotation(previewView.display.rotation)
@@ -127,22 +129,35 @@ class CameraManager(private val context: Context) {
 
         isCapturing = true
 
+        // Create temp file for the image
+        val photoFile = File(context.cacheDir, "captured_image_${System.currentTimeMillis()}.jpg")
+
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
         capture.takePicture(
+            outputOptions,
             cameraExecutor,
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: ImageProxy) {
-                    val bitmap = imageProxyToBitmap(image)
-                    image.close()
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    val bitmap = loadBitmapFromFile(photoFile)
+
+                    // Delete temp file after loading
+                    photoFile.delete()
 
                     ContextCompat.getMainExecutor(context).execute {
                         capturedBitmap = bitmap
                         isCapturing = false
-                        onCaptured()
+                        if (bitmap != null) {
+                            onCaptured()
+                        } else {
+                            Log.e("CameraManager", "Failed to load bitmap from file")
+                        }
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e("CameraManager", "Photo capture failed", exception)
+                    photoFile.delete()
                     ContextCompat.getMainExecutor(context).execute {
                         isCapturing = false
                     }
@@ -151,18 +166,31 @@ class CameraManager(private val context: Context) {
         )
     }
 
-    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
+    private fun loadBitmapFromFile(file: File): Bitmap? {
+        return try {
+            // Get the rotation from EXIF data
+            val exif = ExifInterface(file.absolutePath)
+            val rotation = when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
 
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Decode the bitmap
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
 
-        // Rotate bitmap based on image rotation
-        return bitmap?.let {
-            val matrix = Matrix()
-            matrix.postRotate(image.imageInfo.rotationDegrees.toFloat())
-            Bitmap.createBitmap(it, 0, 0, it.width, it.height, matrix, true)
+            // Rotate if needed
+            if (rotation != 0f && bitmap != null) {
+                val matrix = Matrix()
+                matrix.postRotate(rotation)
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            } else {
+                bitmap
+            }
+        } catch (e: Exception) {
+            Log.e("CameraManager", "Error loading bitmap from file", e)
+            null
         }
     }
 
